@@ -11,19 +11,20 @@ import Data.Aeson hiding (String, Number, Bool)
 import Data.Aeson.Key as Key
 import qualified Data.Text as Text
 import Data.Text.Encoding (decodeUtf8)
+import Text.Read (readMaybe)
 import Control.Monad (when)
 import Data.List.Split (splitOn)
 import Data.List (splitAt)
 import Data.Char (toLower)
 import qualified Data.Map as Map
-import qualified Data.Scientific
+import Data.Scientific
 import GHC.Generics
 import Test.HUnit 
 import App.Services.Decoder.Types as DecoderTypes
 import App.Services.Decoder.Utils
 
 
-parseEntity :: String -> Maybe (Aeson.Key, Aeson.Value)
+parseEntity :: String -> Either String (Aeson.Key, Aeson.Value)
 parseEntity str = 
   let valType = take 2 str
       keyVal = drop 2 str
@@ -37,35 +38,44 @@ parseEntity str =
               let jsonVal = valueToJSON valueType' val
                   key' = Key.fromString key
               in
-                return (key', jsonVal)
-            Left err -> error $ "Error parsing valueType" <> err
-      Left err -> error $ "Error parsing isArray" <> err
+                case jsonVal of
+                  Right jsonVal' -> Right (key', jsonVal')
+                  Left err -> Left err
+            Left err -> Left err
+      Left err -> Left err
 
 
 
 
-parseDateToJSON :: String -> Aeson.Value
+parseDateToJSON :: String -> Either String Aeson.Value
 parseDateToJSON str = 
   case parseDate str of
-    Just d -> Aeson.String (Text.pack $ show d)
-    Nothing -> error "Invalid date format"
+    Just d -> Right $ Aeson.String (Text.pack $ show d)
+    Nothing -> Left $ "Invalid date format: " <> str
 
-parseNumberToJSON :: String -> Aeson.Value
-parseNumberToJSON str = Aeson.Number $ Data.Scientific.scientific (read str) 0
+parseNumberToJSON :: String -> Either String Aeson.Value
+parseNumberToJSON str = do
+  let nums = readMaybe str :: Maybe Scientific
+  case nums of
+    Just num -> Right $ Aeson.Number num
+    Nothing -> Left $ "Invalid number format: " <> str
 
-parseStringToJSON :: String -> Aeson.Value
-parseStringToJSON str = Aeson.String $ Text.pack str
+parseStringToJSON :: String -> Either String Aeson.Value
+parseStringToJSON str = Right $ Aeson.String $ Text.pack str
 
-parseBoolToJSON :: String -> Aeson.Value
-parseBoolToJSON str = Aeson.Bool (map toLower str `elem` ["y", "t"])
+parseBoolToJSON :: String -> Either String Aeson.Value
+parseBoolToJSON str = Right $ Aeson.Bool (map toLower str `elem` ["y", "t"])
 
-parseArrayToJSON :: (String -> Aeson.Value) -> String -> Aeson.Value
+parseArrayToJSON :: (String -> Either String Aeson.Value) -> String -> Either String Aeson.Value
 parseArrayToJSON parseFn str = 
   let values = splitOn "," str
+      parsedValues = map parseFn values
   in 
-    toJSON $ map parseFn values
+    case sequence parsedValues of
+      Right values' -> Right $ toJSON values'
+      Left err -> Left err
 
-valueToJSON :: DecoderTypes.ValueType -> String -> Aeson.Value
+valueToJSON :: DecoderTypes.ValueType -> String -> Either String Aeson.Value
 valueToJSON (Date False) = parseDateToJSON
 valueToJSON (Number False) = parseNumberToJSON
 valueToJSON (String False) = parseStringToJSON
@@ -82,8 +92,8 @@ parseMessage str =
       parsedEntities = map parseEntity entities
   in 
     case sequence parsedEntities of
-      Just ents -> Right ents
-      Nothing -> Left $ "Error parsing entities" <> show entities <> show parsedEntities
+      Right ents -> Right ents
+      Left error -> Left error
 
 
 
