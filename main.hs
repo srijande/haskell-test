@@ -1,5 +1,11 @@
+
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeOperators #-}
+
 module Main(main) where
 
+import Servant
+import Network.Wai.Handler.Warp (run)
 import qualified Data.Aeson as Aeson
 import Data.Aeson hiding (String, Number, Bool)
 import Data.Aeson.Key as Key
@@ -13,16 +19,30 @@ import Data.List (splitAt)
 import Data.Char (toLower)
 import qualified Data.Map as Map
 import qualified Data.Scientific
-
+import GHC.Generics
 import Test.HUnit 
-
 
 data ValueType = Date Bool | Number Bool | String Bool | BoolType Bool deriving Show
 
+type API = "decode" :> ReqBody '[JSON] String :> Post '[JSON] Aeson.Value
+
+decodeHandler :: String -> Handler Aeson.Value
+decodeHandler str =   
+  case parseMessage str of
+    Left err -> return $ Aeson.String $ Text.pack $ "Error: " ++ err
+    Right json -> return $ Aeson.object json
+
+api :: Server API
+api = decodeHandler
+
+server :: Application
+server = serve (Proxy :: Proxy API) api
+
+main :: IO ()
+main = run 8089 server
 
 parseDate :: String -> Maybe Day
 parseDate str = parseTimeM True defaultTimeLocale "%Y-%m-%d" str :: Maybe Day
-
 
 parseEntity :: String -> Maybe (Aeson.Key, Aeson.Value)
 parseEntity str = do
@@ -34,7 +54,6 @@ parseEntity str = do
     let jsonVal = valueToJSON valueType val
     return ((Key.fromString key), jsonVal)
 
-
 parseValueType :: String -> Bool -> ValueType
 parseValueType vt isArray = 
   case drop 1 vt of
@@ -44,12 +63,10 @@ parseValueType vt isArray =
     "3" -> BoolType isArray
     _ -> error $ "Error parsing value type" <> vt
 
-
 parseIsArray :: String -> Maybe Bool
 parseIsArray "0" = Just False
 parseIsArray "1" = Just True
 parseIsArray _ = error $ "Error parsing value array type" 
-
 
 parseDateToJSON :: String -> Aeson.Value
 parseDateToJSON str = 
@@ -57,25 +74,20 @@ parseDateToJSON str =
     Just d -> Aeson.String (Text.pack $ show d)
     Nothing -> error "Invalid date format"
 
-
 parseNumberToJSON :: String -> Aeson.Value
 parseNumberToJSON str = Aeson.Number $ Data.Scientific.scientific (read str) 0
-
 
 parseStringToJSON :: String -> Aeson.Value
 parseStringToJSON str = Aeson.String $ Text.pack str
 
-
 parseBoolToJSON :: String -> Aeson.Value
 parseBoolToJSON str = Aeson.Bool (map toLower str `elem` ["y", "t"])
-
 
 parseArrayToJSON :: (String -> Aeson.Value) -> String -> Aeson.Value
 parseArrayToJSON parseFn str = 
   let values = splitOn "," str
   in 
     toJSON $ map parseFn values
-
 
 valueToJSON :: ValueType -> String -> Aeson.Value
 valueToJSON (Date False) = parseDateToJSON
@@ -97,21 +109,11 @@ parseMessage str =
       Just ents -> Right ents
       Nothing -> Left $ "Error parsing entities" <> show entities <> show parsedEntities
 
-
-
-run :: String -> String
-run input = 
+runStringDecryption :: String -> String
+runStringDecryption input = 
   case parseMessage input of
     Left err -> "Error: " ++ err
     Right json -> show $ encode $ Aeson.object json
-
-
-
-main :: IO ()
-main = do
-  runTests
-
-
 
 
 runTests :: IO ()
@@ -125,7 +127,7 @@ testCase1 :: IO ()
 testCase1 = do
   let input = "#00date|1997-02-06#02name|bob#01age|20#03hasPassport|Y#12access|read_db,write_db,view_logs"
   let expectedOutput = "{\"access\":[\"read_db\",\"write_db\",\"view_logs\"],\"age\":20,\"date\":\"1997-02-06\",\"hasPassport\":true,\"name\":\"bob\"}"
-  let output = run input
+  let output = runStringDecryption input
   putStrLn $ "Input: " ++ input
   putStrLn $ "Output: " ++ output
   putStrLn $ "Expected: " ++ expectedOutput
@@ -137,7 +139,7 @@ testCase2 :: IO ()
 testCase2 = do
   let input = "#00date|199702-06#02name|bob#01age|20#03hasPassport|Y#12access|read_db,write_db,view_logs"
   let expectedOutput = "{\"access\":[\"read_db\",\"write_db\",\"view_logs\"],\"age\":20,\"date\":\"1997-02-06\",\"hasPassport\":true,\"name\":\"bob\"}"
-  let output = run input
+  let output = runStringDecryption input
   putStrLn $ "Input: " ++ input
   putStrLn $ "Output: " ++ output
   putStrLn $ "Expected: " ++ expectedOutput
@@ -151,7 +153,7 @@ testCase3 :: IO ()
 testCase3 = do
   let input = "#00date|199702-06#02name|bob#01age|20#03hasPassport|Y#12access|read_db,write_db,view_logs"
   let expectedOutput = "{\"access\":[\"read_db\",\"write_db\",\"view_logs\"],\"age\":20,\"date\":\"1997-02-06\",\"hasPassport\":true,\"name\":\"bob\"}"
-  let output = run input
+  let output = runStringDecryption input
   putStrLn $ "Input: " ++ input
   putStrLn $ "Output: " ++ output
   putStrLn $ "Expected: " ++ expectedOutput

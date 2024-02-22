@@ -24,7 +24,8 @@ executable code-exe
     , scientific
     , HUnit
     , containers
-
+    , warp
+    , servant-server
   default-language: Haskell2010
 
 test-suite code-test
